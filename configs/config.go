@@ -5,9 +5,10 @@ import (
 )
 
 type conf struct {
-	RateLimitPerSecond          string `mapstructure:"RATE_LIMIT_PER_SECOND"`
-	RateLimitWithTokenPerSecond string `mapstructure:"RATE_LIMIT_WITH_TOKEN_PER_SECOND"`
-	WebServerPort               string `mapstructure:"WEB_SERVER_PORT"`
+	RateLimitPerSecond              string `mapstructure:"RATE_LIMIT_PER_SECOND"`
+	RateLimitWithTokenPerSecond     string `mapstructure:"RATE_LIMIT_WITH_TOKEN_PER_SECOND"`
+	RateLimitBlockDurationInMinutes string `mapstructure:"RATE_LIMIT_BLOCK_DURATION_IN_MINUTES"`
+	WebServerPort                   string `mapstructure:"WEB_SERVER_PORT"`
 }
 
 func LoadConfig(path string) (*conf, error) {
