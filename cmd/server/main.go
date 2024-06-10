@@ -5,10 +5,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-redis/redis/v8"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
 	"github.com/kleytonsolinho/golang-rate-limiter/configs"
+	"github.com/kleytonsolinho/golang-rate-limiter/utils"
 )
 
 func main() {
@@ -17,31 +20,41 @@ func main() {
 		panic(err)
 	}
 
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "redis:6379",
+		Password: "",
+		DB:       0,
+	})
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 
 	rateLimitPerSecond, _ := strconv.Atoi(config.RateLimitPerSecond)
 	rateLimitWithTokenPerSecond, _ := strconv.Atoi(config.RateLimitWithTokenPerSecond)
+	rateLimitBlockDurationInMinutes, _ := strconv.Atoi(config.RateLimitBlockDurationInMinutes)
+	blockDuration := time.Duration(rateLimitBlockDurationInMinutes) * time.Minute // Tempo de bloqueio após atingir o limite
+
+	rl := utils.NewRateLimiter(blockDuration)
 
 	limitByIP := httprate.Limit(
-		rateLimitPerSecond, // requests per IP
-		1*time.Second,      // per duration
+		rateLimitPerSecond, // requesições/seg por IP
+		1*time.Second,      // por duração
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
+			ip := utils.GetIP(r)
+			println("Blocked IP:", ip)
+			rl.BlockIP(ip)
+			w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(time.Now().Add(blockDuration).Unix(), 10))
 			http.Error(w, "you have reached the maximum number of requests or actions allowed within a certain time frame", http.StatusTooManyRequests)
-		}),
-		httprate.WithKeyFuncs(func(r *http.Request) (string, error) {
-			token := r.Header.Get("X-Ratelimit-Token")
-			if token == "" {
-				return r.RemoteAddr, nil
-			}
-			return "", nil
 		}),
 	)
 
 	limitByToken := httprate.Limit(
-		rateLimitWithTokenPerSecond, // requests per token
-		1*time.Second,               // per duration
+		rateLimitWithTokenPerSecond, // requesições/seg por Token
+		1*time.Second,               // por duração
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
+			token := r.Header.Get("X-Ratelimit-Token")
+			rl.BlockToken(token)
+			w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(time.Now().Add(blockDuration).Unix(), 10))
 			http.Error(w, "you have reached the maximum number of requests or actions allowed within a certain time frame", http.StatusTooManyRequests)
 		}),
 		httprate.WithKeyFuncs(
@@ -50,15 +63,26 @@ func main() {
 				if token != "" {
 					return token, nil
 				}
-				return "", nil
+				return "invalid", nil
 			},
 		),
 	)
 
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := utils.GetIP(r)
 			token := r.Header.Get("X-Ratelimit-Token")
 
+			// Verificar se o IP ou Token está bloqueado
+			blocked, resetTime := rl.IsBlocked(ip, token)
+			if blocked {
+				println("isBlocked:", blocked)
+				w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+				http.Error(w, "valeu", http.StatusTooManyRequests)
+				return
+			}
+
+			// Aplica o rate limit adequado
 			if token == "" {
 				limitByIP(next).ServeHTTP(w, r)
 			} else {
