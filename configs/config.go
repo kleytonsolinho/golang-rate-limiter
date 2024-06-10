@@ -4,16 +4,15 @@ import (
 	"github.com/spf13/viper"
 )
 
-var cfg *conf
-
 type conf struct {
-	RateLimitPerSecond           string `mapstructure:"RATE_LIMIT_PER_SECOND"`
-	WebServerPort                string `mapstructure:"WEB_SERVER_PORT"`
-	RateLimitSecret              string `mapstructure:"RATE_LIMIT_SECRET"`
-	RateLimitWithSecretPerSecond string `mapstructure:"RATE_LIMIT_WITH_SECRET_PER_SECOND"`
+	RateLimitPerSecond          string `mapstructure:"RATE_LIMIT_PER_SECOND"`
+	RateLimitWithTokenPerSecond string `mapstructure:"RATE_LIMIT_WITH_TOKEN_PER_SECOND"`
+	WebServerPort               string `mapstructure:"WEB_SERVER_PORT"`
 }
 
 func LoadConfig(path string) (*conf, error) {
+	var cfg *conf
+
 	viper.SetConfigName("app_config")
 	viper.SetConfigType("env")
 	viper.AddConfigPath(path)
