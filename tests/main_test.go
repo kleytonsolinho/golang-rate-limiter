@@ -7,77 +7,152 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httprate"
+	"github.com/kleytonsolinho/golang-rate-limiter/internal/infra/database"
 	"github.com/kleytonsolinho/golang-rate-limiter/utils"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestRateLimit(t *testing.T) {
-	rl := utils.NewRateLimiter(5 * time.Minute) // Criar um RateLimiter com um tempo de bloqueio de 5 minutos
+type MockRedisClient struct {
+	data map[string]time.Time
+}
 
-	// Testar bloqueio por IP
-	ip := "192.168.1.100"
-	rl.BlockIP(ip)
+func NewMockRedisClient() *MockRedisClient {
+	return &MockRedisClient{data: make(map[string]time.Time)}
+}
 
-	// Verificar se o IP está bloqueado
-	blocked, _ := rl.IsBlocked(ip, "")
-	if !blocked {
-		t.Errorf("Expected IP %s to be blocked, but it's not", ip)
+func (m *MockRedisClient) Create(key string, value interface{}, ttl time.Duration) error {
+	m.data[key] = time.Now().Add(ttl)
+	return nil
+}
+
+func (m *MockRedisClient) Exists(key string) (bool, error) {
+	now := time.Now()
+	if expireTime, exists := m.data[key]; exists && expireTime.After(now) {
+		return true, nil
 	}
+	return false, nil
+}
 
-	// Testar bloqueio por Token
-	token := "my-token"
-	rl.BlockToken(token)
-
-	// Verificar se o token está bloqueado
-	blocked, _ = rl.IsBlocked("", token)
-	if !blocked {
-		t.Errorf("Expected token %s to be blocked, but it's not", token)
-	}
-
-	// Testar se um IP bloqueado não pode fazer uma requisição
-	reqIP, _ := http.NewRequest("GET", "/", nil)
-	reqIP.RemoteAddr = ip
-	wIP := httptest.NewRecorder()
+func setupRouter(rdb database.StorageStrategy) http.Handler {
 	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+
+	rateLimitPerSecond := 2
+	rateLimitWithTokenPerSecond := 2
+	blockDuration := 1 * time.Minute // Tempo de bloqueio após atingir o limite
+
+	limitByIP := httprate.Limit(
+		rateLimitPerSecond, // requesições/seg por IP
+		1*time.Second,      // por duração
+		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
+			ip := utils.GetIP(r)
+			err := rdb.Create(ip, "1", blockDuration)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		}),
+	)
+
+	limitByToken := httprate.Limit(
+		rateLimitWithTokenPerSecond, // requesições/seg por Token
+		1*time.Second,               // por duração
+		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
+			token := r.Header.Get("X-Ratelimit-Token")
+			err := rdb.Create(token, "1", blockDuration)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		}),
+		httprate.WithKeyFuncs(
+			func(r *http.Request) (string, error) {
+				token := r.Header.Get("X-Ratelimit-Token")
+				if token != "" {
+					return token, nil
+				}
+				return "invalid", nil
+			},
+		),
+	)
+
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := utils.GetIP(r)
-			blocked, _ := rl.IsBlocked(ip, "")
-			if blocked {
-				http.Error(w, "IP blocked", http.StatusTooManyRequests)
+			token := r.Header.Get("X-Ratelimit-Token")
+
+			// Verificar se o IP ou Token está bloqueado
+			isBlockedIP, err := rdb.Exists(ip)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
 			}
-			next.ServeHTTP(w, r)
+			isBlockedToken, err := rdb.Exists(token)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			if isBlockedIP || isBlockedToken {
+				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+				return
+			}
+
+			// Aplica o rate limit adequado
+			if token == "" {
+				limitByIP(next).ServeHTTP(w, r)
+			} else {
+				limitByToken(next).ServeHTTP(w, r)
+			}
 		})
 	})
+
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Success!"))
 	})
-	r.ServeHTTP(wIP, reqIP)
-	if wIP.Code != http.StatusTooManyRequests {
-		t.Errorf("Expected IP to be blocked, got status code %d", wIP.Code)
-	}
 
-	// Testar se um token bloqueado não pode fazer uma requisição
-	reqToken, _ := http.NewRequest("GET", "/", nil)
-	reqToken.Header.Set("X-Ratelimit-Token", token)
-	wToken := httptest.NewRecorder()
-	rToken := chi.NewRouter()
-	rToken.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token := r.Header.Get("X-Ratelimit-Token")
-			blocked, _ := rl.IsBlocked("", token)
-			if blocked {
-				http.Error(w, "Token blocked", http.StatusTooManyRequests)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	})
-	rToken.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Success!"))
-	})
-	rToken.ServeHTTP(wToken, reqToken)
-	if wToken.Code != http.StatusTooManyRequests {
-		t.Errorf("Expected token to be blocked, got status code %d", wToken.Code)
-	}
+	return r
+}
+
+func TestRateLimiter(t *testing.T) {
+	mockRedis := NewMockRedisClient()
+	r := setupRouter(mockRedis)
+
+	// Testar rate limiter por Token
+	req, _ := http.NewRequest("GET", "/", nil)
+	req.Header.Set("X-Ratelimit-Token", "test-token")
+	rr := httptest.NewRecorder()
+
+	// Enviar duas requisições para estar dentro do limite
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	rr = httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Enviar uma terceira requisição para atingir o limite
+	rr = httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusTooManyRequests, rr.Code)
+
+	// Testar rate limiter por IP
+	req.Header.Del("X-Ratelimit-Token")
+	rr = httptest.NewRecorder()
+
+	// Enviar duas requisições para estar dentro do limite
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	rr = httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Enviar uma terceira requisição para atingir o limite
+	rr = httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusTooManyRequests, rr.Code)
 }
