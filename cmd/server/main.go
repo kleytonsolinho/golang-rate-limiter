@@ -53,7 +53,7 @@ func main() {
 		rateLimitWithTokenPerSecond, // requesições/seg por Token
 		1*time.Second,               // por duração
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
-			token := r.Header.Get("X-Ratelimit-Token")
+			token := r.Header.Get("API_KEY")
 			err := rdb.Create(token, "1", blockDuration)
 			if err != nil {
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -63,7 +63,7 @@ func main() {
 		}),
 		httprate.WithKeyFuncs(
 			func(r *http.Request) (string, error) {
-				token := r.Header.Get("X-Ratelimit-Token")
+				token := r.Header.Get("API_KEY")
 				if token != "" {
 					return token, nil
 				}
@@ -75,7 +75,7 @@ func main() {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := utils.GetIP(r)
-			token := r.Header.Get("X-Ratelimit-Token")
+			token := r.Header.Get("API_KEY")
 
 			// Verificar se o IP ou Token está bloqueado
 			blocked, err := rdb.Exists(ip, token)
