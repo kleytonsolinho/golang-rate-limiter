@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
 	"github.com/kleytonsolinho/golang-rate-limiter/configs"
+	"github.com/kleytonsolinho/golang-rate-limiter/internal/infra/database"
 	"github.com/kleytonsolinho/golang-rate-limiter/utils"
 )
 
@@ -20,7 +21,7 @@ func main() {
 		panic(err)
 	}
 
-	rdb := redis.NewClient(&redis.Options{
+	rdb := database.LoadStorage(&redis.Options{
 		Addr:     "redis:6379",
 		Password: "",
 		DB:       0,
@@ -34,16 +35,16 @@ func main() {
 	rateLimitBlockDurationInMinutes, _ := strconv.Atoi(config.RateLimitBlockDurationInMinutes)
 	blockDuration := time.Duration(rateLimitBlockDurationInMinutes) * time.Minute // Tempo de bloqueio após atingir o limite
 
-	rl := utils.NewRateLimiter(blockDuration)
-
 	limitByIP := httprate.Limit(
 		rateLimitPerSecond, // requesições/seg por IP
 		1*time.Second,      // por duração
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			ip := utils.GetIP(r)
-			println("Blocked IP:", ip)
-			rl.BlockIP(ip)
-			w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(time.Now().Add(blockDuration).Unix(), 10))
+			err := rdb.Create(ip, "1", blockDuration)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
 			http.Error(w, "you have reached the maximum number of requests or actions allowed within a certain time frame", http.StatusTooManyRequests)
 		}),
 	)
@@ -53,8 +54,11 @@ func main() {
 		1*time.Second,               // por duração
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			token := r.Header.Get("X-Ratelimit-Token")
-			rl.BlockToken(token)
-			w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(time.Now().Add(blockDuration).Unix(), 10))
+			err := rdb.Create(token, "1", blockDuration)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
 			http.Error(w, "you have reached the maximum number of requests or actions allowed within a certain time frame", http.StatusTooManyRequests)
 		}),
 		httprate.WithKeyFuncs(
@@ -74,11 +78,13 @@ func main() {
 			token := r.Header.Get("X-Ratelimit-Token")
 
 			// Verificar se o IP ou Token está bloqueado
-			blocked, resetTime := rl.IsBlocked(ip, token)
+			blocked, err := rdb.Exists(ip, token)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
 			if blocked {
-				println("isBlocked:", blocked)
-				w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
-				http.Error(w, "valeu", http.StatusTooManyRequests)
+				http.Error(w, "you have reached the maximum number of requests or actions allowed within a certain time frame", http.StatusTooManyRequests)
 				return
 			}
 
