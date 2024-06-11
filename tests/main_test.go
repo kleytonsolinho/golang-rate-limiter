@@ -61,7 +61,7 @@ func setupRouter(rdb database.StorageStrategy) http.Handler {
 		rateLimitWithTokenPerSecond, // requesições/seg por Token
 		1*time.Second,               // por duração
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
-			token := r.Header.Get("X-Ratelimit-Token")
+			token := r.Header.Get("API_KEY")
 			err := rdb.Create(token, "1", blockDuration)
 			if err != nil {
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -71,7 +71,7 @@ func setupRouter(rdb database.StorageStrategy) http.Handler {
 		}),
 		httprate.WithKeyFuncs(
 			func(r *http.Request) (string, error) {
-				token := r.Header.Get("X-Ratelimit-Token")
+				token := r.Header.Get("API_KEY")
 				if token != "" {
 					return token, nil
 				}
@@ -83,7 +83,7 @@ func setupRouter(rdb database.StorageStrategy) http.Handler {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := utils.GetIP(r)
-			token := r.Header.Get("X-Ratelimit-Token")
+			token := r.Header.Get("API_KEY")
 
 			// Verificar se o IP ou Token está bloqueado
 			isBlockedIP, err := rdb.Exists(ip)
@@ -123,7 +123,7 @@ func TestRateLimiter(t *testing.T) {
 
 	// Testar rate limiter por Token
 	req, _ := http.NewRequest("GET", "/", nil)
-	req.Header.Set("X-Ratelimit-Token", "test-token")
+	req.Header.Set("API_KEY", "test-token")
 	rr := httptest.NewRecorder()
 
 	// Enviar duas requisições para estar dentro do limite
@@ -140,7 +140,7 @@ func TestRateLimiter(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, rr.Code)
 
 	// Testar rate limiter por IP
-	req.Header.Del("X-Ratelimit-Token")
+	req.Header.Del("API_KEY")
 	rr = httptest.NewRecorder()
 
 	// Enviar duas requisições para estar dentro do limite
