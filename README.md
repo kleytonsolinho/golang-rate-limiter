@@ -54,10 +54,14 @@ O objetivo deste desafio é criar um rate limiter em Go que possa ser utilizado 
 
 ```bash
 docker-compose up
-````
+```
 
 ### Execução de testes
 
 ```bash
 go test ./... -failfast -race -count 1
-````
+```
+
+## Documentação e Configuração
+
+<a href="">Link para documentação<a>
