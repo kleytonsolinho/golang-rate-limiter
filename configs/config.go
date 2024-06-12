@@ -5,7 +5,7 @@ import (
 )
 
 type conf struct {
-	RateLimitPerSecond              string `mapstructure:"RATE_LIMIT_PER_SECOND"`
+	RateLimitWithIPPerSecond        string `mapstructure:"RATE_LIMIT_WITH_IP_PER_SECOND"`
 	RateLimitWithTokenPerSecond     string `mapstructure:"RATE_LIMIT_WITH_TOKEN_PER_SECOND"`
 	RateLimitBlockDurationInMinutes string `mapstructure:"RATE_LIMIT_BLOCK_DURATION_IN_MINUTES"`
 	WebServerPort                   string `mapstructure:"WEB_SERVER_PORT"`
