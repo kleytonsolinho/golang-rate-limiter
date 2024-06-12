@@ -39,13 +39,13 @@ func setupRouter(rdb database.StorageStrategy) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 
-	rateLimitPerSecond := 2
+	rateLimitWithIPPerSecond := 2
 	rateLimitWithTokenPerSecond := 2
 	blockDuration := 1 * time.Minute // Tempo de bloqueio após atingir o limite
 
 	limitByIP := httprate.Limit(
-		rateLimitPerSecond, // requesições/seg por IP
-		1*time.Second,      // por duração
+		rateLimitWithIPPerSecond, // requesições/seg por IP
+		1*time.Second,            // por duração
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			ip := utils.GetIP(r)
 			err := rdb.Create(ip, "1", blockDuration)
