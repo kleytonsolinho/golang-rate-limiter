@@ -30,14 +30,14 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 
-	rateLimitPerSecond, _ := strconv.Atoi(config.RateLimitPerSecond)
+	rateLimitWithIPPerSecond, _ := strconv.Atoi(config.RateLimitWithIPPerSecond)
 	rateLimitWithTokenPerSecond, _ := strconv.Atoi(config.RateLimitWithTokenPerSecond)
 	rateLimitBlockDurationInMinutes, _ := strconv.Atoi(config.RateLimitBlockDurationInMinutes)
 	blockDuration := time.Duration(rateLimitBlockDurationInMinutes) * time.Minute // Tempo de bloqueio após atingir o limite
 
 	limitByIP := httprate.Limit(
-		rateLimitPerSecond, // requesições/seg por IP
-		1*time.Second,      // por duração
+		rateLimitWithIPPerSecond, // requesições/seg por IP
+		1*time.Second,            // por duração
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			ip := utils.GetIP(r)
 			err := rdb.Create(ip, "1", blockDuration)
