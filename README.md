@@ -64,4 +64,4 @@ go test ./... -failfast -race -count 1
 
 ## Documentação e Configuração
 
-<a href="">Link para documentação<a>
+<a href="https://github.com/kleytonsolinho/golang-rate-limiter/blob/main/docs/DOCS.md">Link para documentação<a>
